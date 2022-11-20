@@ -108,14 +108,17 @@ def compute_loss(combined_predictions, combined_targets, model):
             # Fill our empty object target tensor with the IoU we just calculated for each target at the targets position
             tobj[b, anchor, grid_j, grid_i] = iou.detach().clamp(0).type(tobj.dtype)  # Use cells with iou > 0 as object targets
 
+            t_layer = tcls[layer_index].clone()
+            t_layer[t_layer > 0] = 1
+
             # Classification of the class
             # Check if we need to do a classification (number of classes > 1)
             if ps.size(1) - 5 > 1:
                 # Hot one class encoding
-                t = torch.zeros_like(ps[:, 5:], device=device)  # targets
-                t[range(num_targets), tcls[layer_index]] = 1
+                t = torch.zeros_like(ps[:, 5:7], device=device)  # targets
+                t[range(num_targets), t_layer] = 1
                 # Use the tensor to calculate the BCE loss
-                lcls += BCEcls(ps[:, 5:], t)  # BCE
+                lcls += BCEcls(ps[:, 5:7], t)  # BCE
 
         # Classification of the objectness the sequel
         # Calculate the BCE loss between the on the fly generated target and the network prediction
