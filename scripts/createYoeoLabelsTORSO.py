@@ -10,11 +10,18 @@ import numpy as np
 
 # Available classes for YOEO
 CLASSES = {
-    'bb_classes': ['ball', 'goalpost', 'robot'],
+    'bb_classes': ['ball', 'robot'],
     'segmentation_classes': ['field edge', 'lines'],
-    'ignored_classes': ['obstacle', 'L-Intersection', 'X-Intersection', 'T-Intersection']
+    'ignored_classes': ['goalpost', 'obstacle', 'L-Intersection', 'X-Intersection', 'T-Intersection']
     }
 
+#ROBOT_CLASSES = ["robot_red", "robot_blue", "robot_unknown"]
+#ROBOT_NUMBER = [None, 1, 2, 3, 4, 5, 6]
+ROBOT_COLOR_NUMBERS = [
+    "red_None", "red_1", "red_2", "red_3", "red_4", "red_5", "red_6", 
+    "blue_None", "blue_1", "blue_2", "blue_3", "blue_4", "blue_5", "blue_6", 
+    "unknown_None", "unknown_1", "unknown_2", "unknown_3", "unknown_4", "unknown_5", "unknown_6"
+    ]
 
 """
 This script reads annotations in the expected yaml format below
@@ -87,6 +94,7 @@ def range_limited_float_type_0_to_1(arg):
 
 parser = argparse.ArgumentParser(description="Create YOEO labels from yaml files.")
 parser.add_argument("dataset_dir", type=str, help="Directory to a dataset. Output will be written here, unless --destination-dir is given.")
+parser.add_argument("annotation_file", type=str, help="Full path of annotation file")
 parser.add_argument("testsplit", type=range_limited_float_type_0_to_1, help="Amount of test images from total images: train/test split (between 0.0 and 1.0)")
 parser.add_argument("-s", "--seed", type=int, default=random.randint(0, (2**64)-1), help="Seed, that controls the train/test split (integer)")
 parser.add_argument("--destination-dir", type=str, default="", help="Writes output files to specified directory.")
@@ -128,7 +136,7 @@ if not os.path.exists(masks_dir):
     os.makedirs(masks_dir)
 
 # Load annotation data from yaml file
-annotations_file = os.path.join(dataset_dir, "annotations.yaml")
+annotations_file = args.annotation_file #os.path.join(dataset_dir, "annotations.yaml")
 with open(annotations_file) as f:
     export = yaml.safe_load(f)
 
@@ -178,7 +186,14 @@ for img_name, frame in export['images'].items():
                     relcenter_x = center_x / imgwidth
                     relcenter_y = center_y / imgheight
 
-                    classID = CLASSES['bb_classes'].index(annotation['type'])  # Derive classID from index in predefined classes
+                    if annotation['type'] != "robot":
+                        classID = CLASSES['bb_classes'].index(annotation['type'])  # Derive classID from index in predefined classes
+                    else:
+                        if annotation["number"] is None:
+                            number = "None"
+                        else:
+                            number = str(annotation["number"])
+                        classID = ROBOT_COLOR_NUMBERS.index(f"{annotation['color']}_{number}") + 1
                     annotations.append(f"{classID} {relcenter_x} {relcenter_y} {relannowidth} {relannoheight}")  # Append to store it later
                 else:  # Annotation is not in image
                     continue
