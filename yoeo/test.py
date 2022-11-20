@@ -134,7 +134,7 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
             times.append(time.time() - t1)
             yolo_outputs = non_max_suppression(yolo_outputs, conf_thres=conf_thres, iou_thres=nms_thres)
 
-        sample_metrics += get_batch_statistics(yolo_outputs, bb_targets, iou_threshold=iou_thres)
+        sample_metrics += get_batch_statistics(yolo_outputs[:, :7], bb_targets, iou_threshold=iou_thres)
 
         seg_ious.append(seg_iou(to_cpu(segmentation_outputs), mask_targets, model.num_seg_classes))
 

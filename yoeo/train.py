@@ -219,6 +219,7 @@ def run():
                 ("train/obj_loss", float(loss_components[1])),
                 ("train/class_loss", float(loss_components[2])),
                 ("train/seg_loss", float(loss_components[3])),
+                ("train/color_loss", float(loss_components[5])),
                 ("train/loss", to_cpu(loss).item())]
             logger.list_of_scalars_summary(tensorboard_log, batches_done)
 
@@ -238,30 +239,30 @@ def run():
         # Evaluate
         # ########
 
-        if epoch % args.evaluation_interval == 0:
-            print("\n---- Evaluating Model ----")
-            # Evaluate the model on the validation set
-            metrics_output = _evaluate(
-                model,
-                validation_dataloader,
-                class_names,
-                img_size=model.hyperparams['height'],
-                iou_thres=args.iou_thres,
-                conf_thres=args.conf_thres,
-                nms_thres=args.nms_thres,
-                verbose=args.verbose
-            )
+        # if epoch % args.evaluation_interval == 0:
+        #     print("\n---- Evaluating Model ----")
+        #     # Evaluate the model on the validation set
+        #     metrics_output = _evaluate(
+        #         model,
+        #         validation_dataloader,
+        #         class_names,
+        #         img_size=model.hyperparams['height'],
+        #         iou_thres=args.iou_thres,
+        #         conf_thres=args.conf_thres,
+        #         nms_thres=args.nms_thres,
+        #         verbose=args.verbose
+        #     )
 
-            if metrics_output is not None:
-                precision, recall, AP, f1, ap_class = metrics_output[0]
-                seg_class_ious = metrics_output[1]
-                evaluation_metrics = [
-                    ("validation/precision", precision.mean()),
-                    ("validation/recall", recall.mean()),
-                    ("validation/mAP", AP.mean()),
-                    ("validation/f1", f1.mean()),
-                    ("validation/seg_iou", np.array(seg_class_ious).mean())]
-                logger.list_of_scalars_summary(evaluation_metrics, epoch)
+        #     if metrics_output is not None:
+        #         precision, recall, AP, f1, ap_class = metrics_output[0]
+        #         seg_class_ious = metrics_output[1]
+        #         evaluation_metrics = [
+        #             ("validation/precision", precision.mean()),
+        #             ("validation/recall", recall.mean()),
+        #             ("validation/mAP", AP.mean()),
+        #             ("validation/f1", f1.mean()),
+        #             ("validation/seg_iou", np.array(seg_class_ious).mean())]
+        #         logger.list_of_scalars_summary(evaluation_metrics, epoch)
 
 
 if __name__ == "__main__":

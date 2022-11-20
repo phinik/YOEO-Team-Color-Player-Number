@@ -67,6 +67,7 @@ def compute_loss(combined_predictions, combined_targets, model):
 
     # Add placeholder varables for the different losses
     lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
+    lcolor = torch.zeros(1, device=device)
 
     # Build yolo targets
     tcls, tbox, indices, anchors = build_targets(yolo_predictions, yolo_targets, model)  # targets
@@ -76,6 +77,8 @@ def compute_loss(combined_predictions, combined_targets, model):
         pos_weight=torch.tensor([1.0], device=device))
     BCEobj = nn.BCEWithLogitsLoss(
         pos_weight=torch.tensor([1.0], device=device))
+
+    CEcolor = nn.CrossEntropyLoss(ignore_index=-1)
 
     # Calculate losses for each yolo layer
     for layer_index, layer_predictions in enumerate(yolo_predictions):
@@ -108,9 +111,11 @@ def compute_loss(combined_predictions, combined_targets, model):
             # Fill our empty object target tensor with the IoU we just calculated for each target at the targets position
             tobj[b, anchor, grid_j, grid_i] = iou.detach().clamp(0).type(tobj.dtype)  # Use cells with iou > 0 as object targets
 
+
+            t_color = torch.add(tcls[layer_index], -1)
             t_layer = tcls[layer_index].clone()
             t_layer[t_layer > 0] = 1
-
+    
             # Classification of the class
             # Check if we need to do a classification (number of classes > 1)
             if ps.size(1) - 5 > 1:
@@ -119,6 +124,9 @@ def compute_loss(combined_predictions, combined_targets, model):
                 t[range(num_targets), t_layer] = 1
                 # Use the tensor to calculate the BCE loss
                 lcls += BCEcls(ps[:, 5:7], t)  # BCE
+
+                # color loss
+                lcolor += CEcolor(ps[:, 7:], t_color)
 
         # Classification of the objectness the sequel
         # Calculate the BCE loss between the on the fly generated target and the network prediction
@@ -130,9 +138,9 @@ def compute_loss(combined_predictions, combined_targets, model):
     lcls *= 0.05
 
     # Merge losses
-    loss = lbox + lobj + lcls + seg_loss
+    loss = lbox + lobj + lcls + seg_loss# + lcolor
 
-    return loss, to_cpu(torch.cat((lbox, lobj, lcls, seg_loss, loss)))
+    return loss, to_cpu(torch.cat((lbox, lobj, lcls, seg_loss, loss, lcolor)))
 
 
 def build_targets(p, targets, model):
