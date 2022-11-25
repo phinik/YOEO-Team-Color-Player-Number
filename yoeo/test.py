@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from torch.autograd import Variable
 
 from yoeo.models import load_model
-from yoeo.utils.utils import load_classes, ap_per_class, get_batch_statistics, non_max_suppression, to_cpu, xywh2xyxy, print_environment_info, seg_iou
+from yoeo.utils.utils import load_classes, ap_per_class, get_batch_statistics, non_max_suppression, to_cpu, xywh2xyxy, print_environment_info, seg_iou, encode_predicted_color, encode_target_color
 from yoeo.utils.datasets import ListDataset
 from yoeo.utils.transforms import DEFAULT_TRANSFORMS
 from yoeo.utils.parse_config import parse_data_config
@@ -50,7 +50,7 @@ def evaluate_model_file(model_path, weights_path, img_path, class_names, batch_s
     dataloader = _create_validation_data_loader(
         img_path, batch_size, img_size, n_cpu)
     model = load_model(model_path, weights_path)
-    metrics_output, seg_class_ious = _evaluate(
+    metrics_output, seg_class_ious, color_matrix = _evaluate(
         model,
         dataloader,
         class_names,
@@ -59,10 +59,10 @@ def evaluate_model_file(model_path, weights_path, img_path, class_names, batch_s
         conf_thres,
         nms_thres,
         verbose)
-    return metrics_output, seg_class_ious
+    return metrics_output, seg_class_ious, color_matrix
 
 
-def print_eval_stats(metrics_output, seg_class_ious, class_names, verbose):
+def print_eval_stats(metrics_output, seg_class_ious, color_matrix, class_names, verbose):
     # Print detection statistics
     if metrics_output is not None:
         precision, recall, AP, f1, ap_class = metrics_output
@@ -87,6 +87,26 @@ def print_eval_stats(metrics_output, seg_class_ious, class_names, verbose):
     # Print mean IoU
     mean_seg_class_ious = np.array(seg_class_ious).mean()
     print(f"----Average IoU {mean_seg_class_ious:.5f} ----")
+
+
+    # Print color statistics
+    if metrics_output is not None:
+        color_mACC = np.mean((color_matrix[:, 0] + color_matrix[:, 2]) / np.sum(color_matrix, axis=1), axis=0)
+        red_ACC = (color_matrix[0, 0] + color_matrix[0, 2]) / np.sum(color_matrix[0, :])
+        blue_ACC =  (color_matrix[1, 0] + color_matrix[1, 2]) / np.sum(color_matrix[1, :])
+        un_ACC = (color_matrix[2, 0] + color_matrix[2, 2]) / np.sum(color_matrix[2, :])
+                    
+        if verbose:
+            # Prints class ACC and mean ACC
+            ap_table = [["Index", "Class", "ACC"]]
+            classes = ["red", "blue", "unknown"]
+            accs = [red_ACC, blue_ACC, un_ACC]
+            for i, c in enumerate(classes):
+                ap_table += [[classes.index(c), c, "%.5f" % accs[i]]]
+            print(AsciiTable(ap_table).table)
+        print(f"---- mACC {color_mACC:.5f} ----")
+    else:
+        print("---- mAP not measured (no detections found by model) ----")
 
 
 def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, nms_thres, verbose):
@@ -117,12 +137,12 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
     labels = []
     sample_metrics = []  # List of tuples (TP, confs, pred)
     seg_ious = []
+    color_matrix = np.zeros(shape=(3, 4), dtype=np.uint32)
     import time
     times=[]
     for _, imgs, bb_targets, mask_targets in tqdm.tqdm(dataloader, desc="Validating"):
-        # Extract labels
-        labels += bb_targets[:, 1].tolist()
-        # Rescale target
+        
+
         bb_targets[:, 2:] = xywh2xyxy(bb_targets[:, 2:])
         bb_targets[:, 2:] *= img_size
 
@@ -133,8 +153,16 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
             yolo_outputs, segmentation_outputs = model(imgs)
             times.append(time.time() - t1)
             yolo_outputs = non_max_suppression(yolo_outputs, conf_thres=conf_thres, iou_thres=nms_thres)
+            
+        yolo_outputs = encode_predicted_color(yolo_outputs)
+        bb_targets = encode_target_color(bb_targets)
 
-        sample_metrics += get_batch_statistics(yolo_outputs[:, :7], bb_targets, iou_threshold=iou_thres)
+        # Extract labels
+        labels += bb_targets[:, 1].tolist()
+
+        s_metrics, c_matrix = get_batch_statistics(yolo_outputs, bb_targets, iou_threshold=iou_thres)
+        sample_metrics += s_metrics
+        color_matrix += c_matrix
 
         seg_ious.append(seg_iou(to_cpu(segmentation_outputs), mask_targets, model.num_seg_classes))
 
@@ -152,9 +180,9 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
 
     seg_class_ious = [np.array(class_ious).mean() for class_ious in list(zip(*seg_ious))]
 
-    print_eval_stats(yolo_metrics_output, seg_class_ious, class_names, verbose)
+    print_eval_stats(yolo_metrics_output, seg_class_ious, color_matrix, class_names, verbose)
 
-    return yolo_metrics_output, seg_class_ious
+    return yolo_metrics_output, seg_class_ious, color_matrix
 
 
 def _create_validation_data_loader(img_path, batch_size, img_size, n_cpu):

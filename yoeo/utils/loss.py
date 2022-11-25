@@ -78,7 +78,7 @@ def compute_loss(combined_predictions, combined_targets, model):
     BCEobj = nn.BCEWithLogitsLoss(
         pos_weight=torch.tensor([1.0], device=device))
 
-    CEcolor = nn.CrossEntropyLoss(ignore_index=-1)
+    CEcolor = nn.CrossEntropyLoss(weight=torch.tensor([2.34514356, 3.55462963, 1.], device=device), ignore_index=-1)
 
     # Calculate losses for each yolo layer
     for layer_index, layer_predictions in enumerate(yolo_predictions):
@@ -119,9 +119,10 @@ def compute_loss(combined_predictions, combined_targets, model):
             # Classification of the class
             # Check if we need to do a classification (number of classes > 1)
             if ps.size(1) - 5 > 1:
-                # Hot one class encoding
+                # One-hot class encoding
                 t = torch.zeros_like(ps[:, 5:7], device=device)  # targets
                 t[range(num_targets), t_layer] = 1
+
                 # Use the tensor to calculate the BCE loss
                 lcls += BCEcls(ps[:, 5:7], t)  # BCE
 
@@ -136,9 +137,10 @@ def compute_loss(combined_predictions, combined_targets, model):
     lbox *= 0.2
     lobj *= 1.0
     lcls *= 0.05
+    lcolor *= 0.025
 
     # Merge losses
-    loss = lbox + lobj + lcls + seg_loss# + lcolor
+    loss = lbox + lobj + lcls + seg_loss + lcolor
 
     return loss, to_cpu(torch.cat((lbox, lobj, lcls, seg_loss, loss, lcolor)))
 

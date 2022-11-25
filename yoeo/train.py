@@ -218,6 +218,7 @@ def run():
                 ("train/iou_loss", float(loss_components[0])),
                 ("train/obj_loss", float(loss_components[1])),
                 ("train/class_loss", float(loss_components[2])),
+                ("train/yolo_loss", float(loss_components[0] + loss_components[1] + loss_components[2])),
                 ("train/seg_loss", float(loss_components[3])),
                 ("train/color_loss", float(loss_components[5])),
                 ("train/loss", to_cpu(loss).item())]
@@ -239,31 +240,42 @@ def run():
         # Evaluate
         # ########
 
-        # if epoch % args.evaluation_interval == 0:
-        #     print("\n---- Evaluating Model ----")
-        #     # Evaluate the model on the validation set
-        #     metrics_output = _evaluate(
-        #         model,
-        #         validation_dataloader,
-        #         class_names,
-        #         img_size=model.hyperparams['height'],
-        #         iou_thres=args.iou_thres,
-        #         conf_thres=args.conf_thres,
-        #         nms_thres=args.nms_thres,
-        #         verbose=args.verbose
-        #     )
+        if epoch % args.evaluation_interval == 0:
+            print("\n---- Evaluating Model ----")
+            # Evaluate the model on the validation set
+            metrics_output = _evaluate(
+                model,
+                validation_dataloader,
+                class_names,
+                img_size=model.hyperparams['height'],
+                iou_thres=args.iou_thres,
+                conf_thres=args.conf_thres,
+                nms_thres=args.nms_thres,
+                verbose=args.verbose
+            )
 
-        #     if metrics_output is not None:
-        #         precision, recall, AP, f1, ap_class = metrics_output[0]
-        #         seg_class_ious = metrics_output[1]
-        #         evaluation_metrics = [
-        #             ("validation/precision", precision.mean()),
-        #             ("validation/recall", recall.mean()),
-        #             ("validation/mAP", AP.mean()),
-        #             ("validation/f1", f1.mean()),
-        #             ("validation/seg_iou", np.array(seg_class_ious).mean())]
-        #         logger.list_of_scalars_summary(evaluation_metrics, epoch)
-
+            if metrics_output is not None:
+                precision, recall, AP, f1, ap_class = metrics_output[0]
+                seg_class_ious = metrics_output[1]
+                color_matrix = metrics_output[2]
+                evaluation_metrics = [
+                    ("validation/precision", precision.mean()),
+                    ("validation/recall", recall.mean()),
+                    ("validation/mAP", AP.mean()), 
+                    ("validation/f1", f1.mean()),
+                    ("validation/seg_iou", np.array(seg_class_ious).mean()),
+                    ("validation/color_mACC", np.mean((color_matrix[:, 0] + color_matrix[:, 2]) / np.sum(color_matrix, axis=1), axis=0)),
+                    ("validation/red_ACC", (color_matrix[0, 0] + color_matrix[0, 2]) / np.sum(color_matrix[0, :])),
+                    ("validation/blue_ACC", (color_matrix[1, 0] + color_matrix[1, 2]) / np.sum(color_matrix[1, :])),
+                    ("validation/unknown_ACC", (color_matrix[2, 0] + color_matrix[2, 2]) / np.sum(color_matrix[2, :])),
+                    ("validation/red_prec", color_matrix[0, 0] / (color_matrix[0, 0] + color_matrix[0, 1])),
+                    ("validation/blue_prec", color_matrix[1, 0] / (color_matrix[1, 0] + color_matrix[1, 1])),
+                    ("validation/unknown_prec", color_matrix[2, 0] / (color_matrix[2, 0] + color_matrix[2, 1])),
+                    ("validation/red_rec", color_matrix[0, 0] / (color_matrix[0, 0] + color_matrix[0, 3])),
+                    ("validation/blue_rec", color_matrix[1, 0] / (color_matrix[1, 0] + color_matrix[1, 3])),
+                    ("validation/unknown_rec", color_matrix[2, 0] / (color_matrix[2, 0] + color_matrix[2, 3]))]
+                logger.list_of_scalars_summary(evaluation_metrics, epoch)
+ 
 
 if __name__ == "__main__":
     run()

@@ -14,8 +14,12 @@ import random
 from typing import List
 import yaml
 
+import os
+
 
 def provide_determinism(seed=42):
+    os.environ['PYTHONHASHSEED'] = '0'  # new
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -23,6 +27,8 @@ def provide_determinism(seed=42):
 
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
+
+    #torch.use_deterministic_algorithms(True)  # new
 
 
 def worker_seed_set(worker_id):
@@ -301,26 +307,31 @@ def compute_ap(recall, precision):
 def get_batch_statistics(outputs, targets, iou_threshold):
     """ Compute true positives, predicted scores and predicted labels per sample """
     batch_metrics = []
+    color_matrix = np.zeros(shape=(3, 4), dtype=np.uint32)  # color x (TP, FP, TN, FN)
+
     for sample_i in range(len(outputs)):
 
-        if outputs[sample_i] is None:
+        if outputs[sample_i] is None:# or outputs[sample_i].nelement() == 0:
             continue
 
         output = outputs[sample_i]
         pred_boxes = output[:, :4]
         pred_scores = output[:, 4]
-        pred_labels = output[:, -1]
-
+        pred_labels = output[:, 5]
+        pred_colors = output[:, 6]
+        #print(output)
         true_positives = np.zeros(pred_boxes.shape[0])
+        
 
         annotations = targets[targets[:, 0] == sample_i][:, 1:]
         target_labels = annotations[:, 0] if len(annotations) else []
-        target_labels = [min(label, 1) for label in target_labels]
+        target_colors = annotations[:, -1] if len(annotations) else []
+
         if len(annotations):
             detected_boxes = []
-            target_boxes = annotations[:, 1:]
+            target_boxes = annotations[:, 1:5]
 
-            for pred_i, (pred_box, pred_label) in enumerate(zip(pred_boxes, pred_labels)):
+            for pred_i, (pred_box, pred_label, pred_color) in enumerate(zip(pred_boxes, pred_labels, pred_colors)):
 
                 # If targets are found break
                 if len(detected_boxes) == len(annotations):
@@ -344,9 +355,40 @@ def get_batch_statistics(outputs, targets, iou_threshold):
                 if iou >= iou_threshold and box_index not in detected_boxes:
                     true_positives[pred_i] = 1
                     detected_boxes += [box_index]
-        batch_metrics.append([true_positives, pred_scores, pred_labels])
-    return batch_metrics
+                    
+                    # wir mappen eh nur gegen Boxen, die das gleiche target label haben wie das pred_label. Daher ist es egal
+                    # ob wir hier basierend auf target_label[box_index] oder pred_label unterscheiden.
+                    if pred_label > 0:
+                        if pred_color == target_colors[box_index]:
+                            color_matrix[pred_color.int(), 0] += 1
+                            color_matrix[:, 2] += 1
+                            color_matrix[pred_color.int(), 2] -= 1
+                        else:
+                            color_matrix[pred_color.int(), 1] += 1
+                            color_matrix[target_colors[box_index].int(), 3] += 1
 
+        batch_metrics.append([true_positives, pred_scores, pred_labels])
+    return batch_metrics, color_matrix
+
+def encode_predicted_color(preds):
+    for sample_i in range(len(preds)):
+        if preds[sample_i] is None:# or torch.numel(preds[sample_i]) == 0:
+            continue
+
+        pred = preds[sample_i]
+        pred = torch.cat((pred[:, :6], torch.argmax(pred[:, 6:], dim=1, keepdim=True)), dim=1)
+        preds[sample_i] = pred
+
+    return preds
+
+def encode_target_color(targets):
+    # Add another column for the color
+    targets = torch.cat((targets, torch.unsqueeze(torch.add(targets[:, 1], -1), dim=1)), dim=1)
+
+    # Map directly encoded colors to just 1
+    targets[targets[:, 1] > 1, 1] = 1
+    
+    return targets
 
 def bbox_wh_iou(wh1, wh2):
     wh2 = wh2.t()
@@ -436,7 +478,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     multi_label = nc > 1  # multiple labels per box (adds 0.5ms/img)
 
     t = time.time()
-    output = [torch.zeros((0, 6), device="cpu")] * prediction.shape[0]
+    output = [torch.zeros((0, 9), device="cpu")] * prediction.shape[0]
 
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints
@@ -456,10 +498,10 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         # Detections matrix nx6 (xyxy, conf, cls) , color
         if multi_label:
             i, j = (x[:, 5:7] > conf_thres).nonzero(as_tuple=False).T
-            x = torch.cat((box[i], x[i, j + 5, None], j[:, None].float(), x[:, 7:]), 1)
+            x = torch.cat((box[i], x[i, j + 5, None], j[:, None].float(), x[i, 7:]), 1)
         else:  # best class only
             conf, j = x[:, 5:7].max(1, keepdim=True)
-            x = torch.cat((box, conf, j.float(), x[:, 7:]), 1)[conf.view(-1) > conf_thres]
+            x = torch.cat((box, conf, j.float(), x[i, 7:]), 1)[conf.view(-1) > conf_thres]
 
         # Filter by class
         if classes is not None:

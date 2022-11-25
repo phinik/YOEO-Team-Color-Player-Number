@@ -16,7 +16,7 @@ from torch.autograd import Variable
 from imgaug.augmentables.segmaps import SegmentationMapsOnImage
 
 from yoeo.models import load_model
-from yoeo.utils.utils import load_classes, rescale_boxes, non_max_suppression, print_environment_info, rescale_segmentation
+from yoeo.utils.utils import load_classes, rescale_boxes, non_max_suppression, print_environment_info, rescale_segmentation, encode_predicted_color
 from yoeo.utils.datasets import ImageFolder
 from yoeo.utils.transforms import Resize, DEFAULT_TRANSFORMS
 
@@ -141,6 +141,8 @@ def detect(model, dataloader, output_path, conf_thres, nms_thres):
             detections, segmentations = model(input_imgs)
             detections = non_max_suppression(detections, conf_thres, nms_thres)
 
+        detections = encode_predicted_color(detections)
+
         # Store image and detections
         img_detections.extend(detections)
         seg_detections.extend(segmentations)
@@ -220,9 +222,10 @@ def _draw_and_save_output_image(image_path, detections, seg, img_size, output_pa
     # Bounding-box colors
     cmap = plt.get_cmap("tab20b")
     colors = [cmap(i) for i in np.linspace(0, 1, len(classes))]
-    for x1, y1, x2, y2, conf, cls_pred in detections:
+    colors = ["red", "blue", "unknown"]
+    for x1, y1, x2, y2, conf, cls_pred, color_pred in detections:
 
-        print(f"\t+ Label: {classes[int(cls_pred)]} | Confidence: {conf.item():0.4f}")
+        print(f"\t+ Label: {classes[int(cls_pred)]} | Confidence: {conf.item():0.4f} | Color: {colors[color_pred.int()]}")
 
         box_w = x2 - x1
         box_h = y2 - y1
@@ -232,15 +235,15 @@ def _draw_and_save_output_image(image_path, detections, seg, img_size, output_pa
         # Add the bbox to the plot
         ax.add_patch(bbox)
         # Add label
-        """
+        
         plt.text(
             x1,
             y1,
-            s=classes[int(cls_pred)],
+            s=classes[int(cls_pred)] + colors[color_pred.int()],
             color="white",
             verticalalignment="top",
             bbox={"color": colors[int(cls_pred)], "pad": 0})
-        """
+        
 
     # Save generated image with detections
     plt.axis("off")
