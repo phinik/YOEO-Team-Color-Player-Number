@@ -17,6 +17,7 @@ from yoeo.utils.utils import load_classes, ap_per_class, get_batch_statistics, n
 from yoeo.utils.datasets import ListDataset
 from yoeo.utils.transforms import DEFAULT_TRANSFORMS
 from yoeo.utils.parse_config import parse_data_config
+from yoeo.utils.metric import Metric
 
 
 def evaluate_model_file(model_path, weights_path, img_path, class_names, batch_size=8, img_size=416,
@@ -62,7 +63,7 @@ def evaluate_model_file(model_path, weights_path, img_path, class_names, batch_s
     return metrics_output, seg_class_ious, color_matrix
 
 
-def print_eval_stats(metrics_output, seg_class_ious, color_matrix, class_names, verbose):
+def print_eval_stats(metrics_output, seg_class_ious, color_metric, class_names, verbose):
     # Print detection statistics
     if metrics_output is not None:
         precision, recall, AP, f1, ap_class = metrics_output
@@ -91,20 +92,20 @@ def print_eval_stats(metrics_output, seg_class_ious, color_matrix, class_names, 
 
     # Print color statistics
     if metrics_output is not None:
-        color_mACC = np.mean((color_matrix[:, 0] + color_matrix[:, 2]) / np.sum(color_matrix, axis=1), axis=0)
-        red_ACC = (color_matrix[0, 0] + color_matrix[0, 2]) / np.sum(color_matrix[0, :])
-        blue_ACC =  (color_matrix[1, 0] + color_matrix[1, 2]) / np.sum(color_matrix[1, :])
-        un_ACC = (color_matrix[2, 0] + color_matrix[2, 2]) / np.sum(color_matrix[2, :])
+        mbACC = color_metric.mbACC()
+        bACC_red = color_metric.bACC(0)
+        bACC_blue = color_metric.bACC(1)
+        bACC_un = color_metric.bACC(2)
                     
         if verbose:
             # Prints class ACC and mean ACC
             ap_table = [["Index", "Class", "ACC"]]
             classes = ["red", "blue", "unknown"]
-            accs = [red_ACC, blue_ACC, un_ACC]
+            accs = [bACC_red, bACC_blue, bACC_un]
             for i, c in enumerate(classes):
                 ap_table += [[classes.index(c), c, "%.5f" % accs[i]]]
             print(AsciiTable(ap_table).table)
-        print(f"---- mACC {color_mACC:.5f} ----")
+        print(f"---- mbACC {mbACC:.5f} ----")
     else:
         print("---- mAP not measured (no detections found by model) ----")
 
@@ -137,7 +138,8 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
     labels = []
     sample_metrics = []  # List of tuples (TP, confs, pred)
     seg_ious = []
-    color_matrix = np.zeros(shape=(3, 4), dtype=np.uint32)
+    color_metric = Metric(3)
+
     import time
     times=[]
     for _, imgs, bb_targets, mask_targets in tqdm.tqdm(dataloader, desc="Validating"):
@@ -160,9 +162,9 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
         # Extract labels
         labels += bb_targets[:, 1].tolist()
 
-        s_metrics, c_matrix = get_batch_statistics(yolo_outputs, bb_targets, iou_threshold=iou_thres)
+        s_metrics, c_metric = get_batch_statistics(yolo_outputs, bb_targets, iou_threshold=iou_thres)
         sample_metrics += s_metrics
-        color_matrix += c_matrix
+        color_metric += c_metric
 
         seg_ious.append(seg_iou(to_cpu(segmentation_outputs), mask_targets, model.num_seg_classes))
 
@@ -180,9 +182,9 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
 
     seg_class_ious = [np.array(class_ious).mean() for class_ious in list(zip(*seg_ious))]
 
-    print_eval_stats(yolo_metrics_output, seg_class_ious, color_matrix, class_names, verbose)
+    print_eval_stats(yolo_metrics_output, seg_class_ious, color_metric, class_names, verbose)
 
-    return yolo_metrics_output, seg_class_ious, color_matrix
+    return yolo_metrics_output, seg_class_ious, color_metric
 
 
 def _create_validation_data_loader(img_path, batch_size, img_size, n_cpu):

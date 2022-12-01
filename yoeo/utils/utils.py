@@ -16,6 +16,8 @@ import yaml
 
 import os
 
+from yoeo.utils.metric import Metric
+
 
 def provide_determinism(seed=42):
     os.environ['PYTHONHASHSEED'] = '0'  # new
@@ -307,7 +309,7 @@ def compute_ap(recall, precision):
 def get_batch_statistics(outputs, targets, iou_threshold):
     """ Compute true positives, predicted scores and predicted labels per sample """
     batch_metrics = []
-    color_matrix = np.zeros(shape=(3, 4), dtype=np.uint32)  # color x (TP, FP, TN, FN)
+    color_metric = Metric(3)
 
     for sample_i in range(len(outputs)):
 
@@ -319,7 +321,7 @@ def get_batch_statistics(outputs, targets, iou_threshold):
         pred_scores = output[:, 4]
         pred_labels = output[:, 5]
         pred_colors = output[:, 6]
-        #print(output)
+
         true_positives = np.zeros(pred_boxes.shape[0])
         
 
@@ -359,16 +361,10 @@ def get_batch_statistics(outputs, targets, iou_threshold):
                     # wir mappen eh nur gegen Boxen, die das gleiche target label haben wie das pred_label. Daher ist es egal
                     # ob wir hier basierend auf target_label[box_index] oder pred_label unterscheiden.
                     if pred_label > 0:
-                        if pred_color == target_colors[box_index]:
-                            color_matrix[pred_color.int(), 0] += 1
-                            color_matrix[:, 2] += 1
-                            color_matrix[pred_color.int(), 2] -= 1
-                        else:
-                            color_matrix[pred_color.int(), 1] += 1
-                            color_matrix[target_colors[box_index].int(), 3] += 1
+                        color_metric.update(pred_color.int(), target_colors[box_index].int())
 
         batch_metrics.append([true_positives, pred_scores, pred_labels])
-    return batch_metrics, color_matrix
+    return batch_metrics, color_metric
 
 def encode_predicted_color(preds):
     for sample_i in range(len(preds)):

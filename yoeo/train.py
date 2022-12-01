@@ -257,23 +257,23 @@ def run():
             if metrics_output is not None:
                 precision, recall, AP, f1, ap_class = metrics_output[0]
                 seg_class_ious = metrics_output[1]
-                color_matrix = metrics_output[2]
+                color_metric = metrics_output[2]
                 evaluation_metrics = [
                     ("validation/precision", precision.mean()),
                     ("validation/recall", recall.mean()),
                     ("validation/mAP", AP.mean()), 
                     ("validation/f1", f1.mean()),
                     ("validation/seg_iou", np.array(seg_class_ious).mean()),
-                    ("validation/color_mACC", np.mean((color_matrix[:, 0] + color_matrix[:, 2]) / np.sum(color_matrix, axis=1), axis=0)),
-                    ("validation/red_ACC", (color_matrix[0, 0] + color_matrix[0, 2]) / np.sum(color_matrix[0, :])),
-                    ("validation/blue_ACC", (color_matrix[1, 0] + color_matrix[1, 2]) / np.sum(color_matrix[1, :])),
-                    ("validation/unknown_ACC", (color_matrix[2, 0] + color_matrix[2, 2]) / np.sum(color_matrix[2, :])),
-                    ("validation/red_prec", color_matrix[0, 0] / (color_matrix[0, 0] + color_matrix[0, 1])),
-                    ("validation/blue_prec", color_matrix[1, 0] / (color_matrix[1, 0] + color_matrix[1, 1])),
-                    ("validation/unknown_prec", color_matrix[2, 0] / (color_matrix[2, 0] + color_matrix[2, 1])),
-                    ("validation/red_rec", color_matrix[0, 0] / (color_matrix[0, 0] + color_matrix[0, 3])),
-                    ("validation/blue_rec", color_matrix[1, 0] / (color_matrix[1, 0] + color_matrix[1, 3])),
-                    ("validation/unknown_rec", color_matrix[2, 0] / (color_matrix[2, 0] + color_matrix[2, 3]))]
+                    ("validation/color_mbACC", color_metric.mbACC()),
+                    ("validation/red_bACC", color_metric.bACC(0)),
+                    ("validation/blue_bACC", color_metric.bACC(1)),
+                    ("validation/unknown_bACC", color_metric.bACC(2)),
+                    ("validation/red_prec", color_metric.PREC(0)),
+                    ("validation/blue_prec", color_metric.PREC(1)),
+                    ("validation/unknown_prec", color_metric.PREC(2)),
+                    ("validation/red_rec", color_metric.REC(0)),
+                    ("validation/blue_rec", color_metric.REC(0)),
+                    ("validation/unknown_rec", color_metric.REC(0))]
                 logger.list_of_scalars_summary(evaluation_metrics, epoch)
  
 
