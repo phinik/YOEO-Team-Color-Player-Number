@@ -13,10 +13,12 @@ from torch.utils.data import DataLoader
 from torch.autograd import Variable
 
 from yoeo.models import load_model
-from yoeo.utils.utils import load_classes, ap_per_class, get_batch_statistics, non_max_suppression, to_cpu, xywh2xyxy, print_environment_info, seg_iou, encode_predicted_color, encode_target_color
+from yoeo.utils.utils import load_classes, ap_per_class, get_batch_statistics, non_max_suppression, to_cpu, xywh2xyxy, print_environment_info, seg_iou, encode_predictions, encode_targets
 from yoeo.utils.datasets import ListDataset
-from yoeo.utils.transforms import DEFAULT_TRANSFORMS
+from yoeo.utils.transforms import DEFAULT_TRANSFORMS, SPAWN_TRANSFORMS
 from yoeo.utils.parse_config import parse_data_config
+from yoeo.utils.metric import Metric
+
 from yoeo.utils.metric import Metric
 
 
@@ -51,7 +53,7 @@ def evaluate_model_file(model_path, weights_path, img_path, class_names, batch_s
     dataloader = _create_validation_data_loader(
         img_path, batch_size, img_size, n_cpu)
     model = load_model(model_path, weights_path)
-    metrics_output, seg_class_ious, color_matrix = _evaluate(
+    metrics_output, seg_class_ious, color_metric, number_metric = _evaluate(
         model,
         dataloader,
         class_names,
@@ -60,10 +62,10 @@ def evaluate_model_file(model_path, weights_path, img_path, class_names, batch_s
         conf_thres,
         nms_thres,
         verbose)
-    return metrics_output, seg_class_ious, color_matrix
+    return metrics_output, seg_class_ious, color_metric, number_metric
 
 
-def print_eval_stats(metrics_output, seg_class_ious, color_metric, class_names, verbose):
+def print_eval_stats(metrics_output, seg_class_ious, color_metric, number_metric, class_names, verbose):
     # Print detection statistics
     if metrics_output is not None:
         precision, recall, AP, f1, ap_class = metrics_output
@@ -99,11 +101,27 @@ def print_eval_stats(metrics_output, seg_class_ious, color_metric, class_names, 
                     
         if verbose:
             # Prints class ACC and mean ACC
-            ap_table = [["Index", "Class", "ACC"]]
+            ap_table = [["Index", "Class", "bACC"]]
             classes = ["red", "blue", "unknown"]
             accs = [bACC_red, bACC_blue, bACC_un]
             for i, c in enumerate(classes):
                 ap_table += [[classes.index(c), c, "%.5f" % accs[i]]]
+            print(AsciiTable(ap_table).table)
+        print(f"---- mbACC {mbACC:.5f} ----")
+    else:
+        print("---- mAP not measured (no detections found by model) ----")
+
+    # Print number statistics
+    if metrics_output is not None:
+        mbACC = number_metric.mbACC()
+        bACCs = [number_metric.bACC(i) for i in range(7)]
+                    
+        if verbose:
+            # Prints class ACC and mean ACC
+            ap_table = [["Index", "Class", "bACC"]]
+            classes = ["unknown", "1", "2", "3", "4", "5", "6"]
+            for i, c in enumerate(classes):
+                ap_table += [[classes.index(c), c, "%.5f" % bACCs[i]]]
             print(AsciiTable(ap_table).table)
         print(f"---- mbACC {mbACC:.5f} ----")
     else:
@@ -139,6 +157,7 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
     sample_metrics = []  # List of tuples (TP, confs, pred)
     seg_ious = []
     color_metric = Metric(3)
+    number_metric = Metric(7)
 
     import time
     times=[]
@@ -156,15 +175,16 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
             times.append(time.time() - t1)
             yolo_outputs = non_max_suppression(yolo_outputs, conf_thres=conf_thres, iou_thres=nms_thres)
             
-        yolo_outputs = encode_predicted_color(yolo_outputs)
-        bb_targets = encode_target_color(bb_targets)
+        yolo_outputs = encode_predictions(yolo_outputs)
+        bb_targets = encode_targets(bb_targets)
 
         # Extract labels
         labels += bb_targets[:, 1].tolist()
 
-        s_metrics, c_metric = get_batch_statistics(yolo_outputs, bb_targets, iou_threshold=iou_thres)
+        s_metrics, c_metric, n_metric = get_batch_statistics(yolo_outputs, bb_targets, iou_threshold=iou_thres)
         sample_metrics += s_metrics
         color_metric += c_metric
+        number_metric += n_metric
 
         seg_ious.append(seg_iou(to_cpu(segmentation_outputs), mask_targets, model.num_seg_classes))
 
@@ -182,9 +202,9 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
 
     seg_class_ious = [np.array(class_ious).mean() for class_ious in list(zip(*seg_ious))]
 
-    print_eval_stats(yolo_metrics_output, seg_class_ious, color_metric, class_names, verbose)
+    print_eval_stats(yolo_metrics_output, seg_class_ious, color_metric, number_metric, class_names, verbose)
 
-    return yolo_metrics_output, seg_class_ious, color_metric
+    return yolo_metrics_output, seg_class_ious, color_metric, number_metric
 
 
 def _create_validation_data_loader(img_path, batch_size, img_size, n_cpu):

@@ -310,6 +310,7 @@ def get_batch_statistics(outputs, targets, iou_threshold):
     """ Compute true positives, predicted scores and predicted labels per sample """
     batch_metrics = []
     color_metric = Metric(3)
+    number_metric = Metric(7)
 
     for sample_i in range(len(outputs)):
 
@@ -321,19 +322,21 @@ def get_batch_statistics(outputs, targets, iou_threshold):
         pred_scores = output[:, 4]
         pred_labels = output[:, 5]
         pred_colors = output[:, 6]
+        pred_numbers = output[:, 7]
 
         true_positives = np.zeros(pred_boxes.shape[0])
         
 
         annotations = targets[targets[:, 0] == sample_i][:, 1:]
         target_labels = annotations[:, 0] if len(annotations) else []
-        target_colors = annotations[:, -1] if len(annotations) else []
+        target_colors = annotations[:, -2] if len(annotations) else []
+        target_numbers = annotations[:, -1] if len(annotations) else []
 
         if len(annotations):
             detected_boxes = []
             target_boxes = annotations[:, 1:5]
 
-            for pred_i, (pred_box, pred_label, pred_color) in enumerate(zip(pred_boxes, pred_labels, pred_colors)):
+            for pred_i, (pred_box, pred_label, pred_color, pred_number) in enumerate(zip(pred_boxes, pred_labels, pred_colors, pred_numbers)):
 
                 # If targets are found break
                 if len(detected_boxes) == len(annotations):
@@ -362,26 +365,42 @@ def get_batch_statistics(outputs, targets, iou_threshold):
                     # ob wir hier basierend auf target_label[box_index] oder pred_label unterscheiden.
                     if pred_label > 0:
                         color_metric.update(pred_color.int(), target_colors[box_index].int())
+                        number_metric.update(pred_number.int(), target_numbers[box_index].int())
 
         batch_metrics.append([true_positives, pred_scores, pred_labels])
-    return batch_metrics, color_metric
+    return batch_metrics, color_metric, number_metric
 
-def encode_predicted_color(preds):
+def encode_predictions(preds):
     for sample_i in range(len(preds)):
-        if preds[sample_i] is None:# or torch.numel(preds[sample_i]) == 0:
+        if preds[sample_i] is None:
             continue
 
         pred = preds[sample_i]
-        pred = torch.cat((pred[:, :6], torch.argmax(pred[:, 6:], dim=1, keepdim=True)), dim=1)
+        p_color = torch.argmax(pred[:, 6:9], dim=1, keepdim=True)
+        p_number = torch.argmax(pred[:, 9:], dim=1, keepdim=True)
+        pred = torch.cat((pred[:, :6], p_color, p_number), dim=1)
         preds[sample_i] = pred
 
     return preds
 
-def encode_target_color(targets):
-    # Add another column for the color
-    targets = torch.cat((targets, torch.unsqueeze(torch.add(targets[:, 1], -1), dim=1)), dim=1)
+def encode_targets(targets):
+    # Shift labels by 1 to the left (ball class)
+    shifted_targets = torch.add(targets[:, 1], -1)
 
-    # Map directly encoded colors to just 1
+    # Calculate color label
+    t_color = torch.div(shifted_targets, 7, rounding_mode='floor')
+    t_color[shifted_targets == -1] = -1
+    t_color = torch.unsqueeze(t_color, dim=1)
+
+    # Calculate number label
+    t_number = shifted_targets % 7
+    t_number[shifted_targets == -1] = -1
+    t_number = torch.unsqueeze(t_number, dim=1)
+
+    # Add extra columns for color and number
+    targets = torch.cat((targets, t_color, t_number), dim=1)
+
+    # Map robots with label > 1 to just 1
     targets[targets[:, 1] > 1, 1] = 1
     
     return targets
@@ -474,7 +493,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     multi_label = nc > 1  # multiple labels per box (adds 0.5ms/img)
 
     t = time.time()
-    output = [torch.zeros((0, 9), device="cpu")] * prediction.shape[0]
+    output = [torch.zeros((0, 16), device="cpu")] * prediction.shape[0]
 
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints

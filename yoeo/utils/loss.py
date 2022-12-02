@@ -68,6 +68,7 @@ def compute_loss(combined_predictions, combined_targets, model):
     # Add placeholder varables for the different losses
     lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
     lcolor = torch.zeros(1, device=device)
+    lnumber = torch.zeros(1, device=device)
 
     # Build yolo targets
     tcls, tbox, indices, anchors = build_targets(yolo_predictions, yolo_targets, model)  # targets
@@ -79,6 +80,10 @@ def compute_loss(combined_predictions, combined_targets, model):
         pos_weight=torch.tensor([1.0], device=device))
 
     CEcolor = nn.CrossEntropyLoss(weight=torch.tensor([2.34514356, 3.55462963, 1.], device=device), ignore_index=-1)
+    CEnumber = nn.CrossEntropyLoss(
+        weight=torch.tensor([1.0, 28.56632653, 40.86861314, 23.52521008, 21.61776062, 155.52777778, 61.52747253], device=device), 
+        ignore_index=-1
+        )
 
     # Calculate losses for each yolo layer
     for layer_index, layer_predictions in enumerate(yolo_predictions):
@@ -112,7 +117,11 @@ def compute_loss(combined_predictions, combined_targets, model):
             tobj[b, anchor, grid_j, grid_i] = iou.detach().clamp(0).type(tobj.dtype)  # Use cells with iou > 0 as object targets
 
 
-            t_color = torch.add(tcls[layer_index], -1)
+            shifted_labels = torch.add(tcls[layer_index], -1)
+            t_color = torch.div(shifted_labels, 7, rounding_mode='floor')
+            t_color[shifted_labels == -1] = -1
+            t_number = shifted_labels % 7
+            t_number[shifted_labels == -1] = -1
             t_layer = tcls[layer_index].clone()
             t_layer[t_layer > 0] = 1
     
@@ -127,7 +136,8 @@ def compute_loss(combined_predictions, combined_targets, model):
                 lcls += BCEcls(ps[:, 5:7], t)  # BCE
 
                 # color loss
-                lcolor += CEcolor(ps[:, 7:], t_color)
+                lcolor += CEcolor(ps[:, 7:10], t_color)
+                lnumber += CEnumber(ps[:, 10:], t_number)
 
         # Classification of the objectness the sequel
         # Calculate the BCE loss between the on the fly generated target and the network prediction
@@ -138,11 +148,12 @@ def compute_loss(combined_predictions, combined_targets, model):
     lobj *= 1.0
     lcls *= 0.05
     lcolor *= 0.025
+    lnumber *= 0.025
 
     # Merge losses
-    loss = lbox + lobj + lcls + seg_loss + lcolor
+    loss = lbox + lobj + lcls + seg_loss + lcolor + lnumber
 
-    return loss, to_cpu(torch.cat((lbox, lobj, lcls, seg_loss, loss, lcolor)))
+    return loss, to_cpu(torch.cat((lbox, lobj, lcls, seg_loss, loss, lcolor, lnumber)))
 
 
 def build_targets(p, targets, model):

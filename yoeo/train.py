@@ -18,7 +18,7 @@ from yoeo.utils.logger import Logger
 from yoeo.utils.utils import to_cpu, load_classes, print_environment_info, provide_determinism, worker_seed_set
 from yoeo.utils.datasets import ListDataset
 from yoeo.utils.augmentations import AUGMENTATION_TRANSFORMS
-from yoeo.utils.transforms import DEFAULT_TRANSFORMS
+from yoeo.utils.transforms import DEFAULT_TRANSFORMS, SPAWN_TRANSFORMS
 from yoeo.utils.parse_config import parse_data_config
 from yoeo.utils.loss import compute_loss
 from yoeo.test import _evaluate, _create_validation_data_loader
@@ -221,6 +221,7 @@ def run():
                 ("train/yolo_loss", float(loss_components[0] + loss_components[1] + loss_components[2])),
                 ("train/seg_loss", float(loss_components[3])),
                 ("train/color_loss", float(loss_components[5])),
+                ("train/number_loss", float(loss_components[6])),
                 ("train/loss", to_cpu(loss).item())]
             logger.list_of_scalars_summary(tensorboard_log, batches_done)
 
@@ -258,24 +259,30 @@ def run():
                 precision, recall, AP, f1, ap_class = metrics_output[0]
                 seg_class_ious = metrics_output[1]
                 color_metric = metrics_output[2]
+                number_metric = metrics_output[3]
+                colors = {0: "red", 1: "blue", 2: "unknown"}
+                numbers = {0: "unknown", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6"}
                 evaluation_metrics = [
                     ("validation/precision", precision.mean()),
                     ("validation/recall", recall.mean()),
                     ("validation/mAP", AP.mean()), 
                     ("validation/f1", f1.mean()),
-                    ("validation/seg_iou", np.array(seg_class_ious).mean()),
-                    ("validation/color_mbACC", color_metric.mbACC()),
-                    ("validation/red_bACC", color_metric.bACC(0)),
-                    ("validation/blue_bACC", color_metric.bACC(1)),
-                    ("validation/unknown_bACC", color_metric.bACC(2)),
-                    ("validation/red_prec", color_metric.PREC(0)),
-                    ("validation/blue_prec", color_metric.PREC(1)),
-                    ("validation/unknown_prec", color_metric.PREC(2)),
-                    ("validation/red_rec", color_metric.REC(0)),
-                    ("validation/blue_rec", color_metric.REC(0)),
-                    ("validation/unknown_rec", color_metric.REC(0))]
+                    ("validation/seg_iou", np.array(seg_class_ious).mean())]
+                
+                evaluation_metrics.append(("validation/color_mbACC", color_metric.mbACC()))
+                for i in range(3):
+                    evaluation_metrics.append((f"validation/{colors[i]}_bACC", color_metric.bACC(i)))
+                    evaluation_metrics.append((f"validation/{colors[i]}_rec", color_metric.REC(i)))
+                    evaluation_metrics.append((f"validation/{colors[i]}_prec", color_metric.PREC(i)))
+
+                evaluation_metrics.append(("validation/number_mbACC", number_metric.mbACC()))
+                for i in range(7):
+                    evaluation_metrics.append((f"validation/{numbers[i]}_bACC", number_metric.bACC(i)))
+                    evaluation_metrics.append((f"validation/{numbers[i]}_rec", number_metric.REC(i)))
+                    evaluation_metrics.append((f"validation/{numbers[i]}_prec", number_metric.PREC(i)))
+
                 logger.list_of_scalars_summary(evaluation_metrics, epoch)
- 
+                
 
 if __name__ == "__main__":
     run()

@@ -9,6 +9,10 @@ from imgaug.augmentables.segmaps import SegmentationMapsOnImage
 from .utils import xywh2xyxy_np
 import torchvision.transforms as transforms
 
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+import matplotlib.pyplot as plt
+
 
 class ImgAug(object):
     def __init__(self, augmentations=[]):
@@ -85,6 +89,41 @@ class AbsoluteLabels(object):
         return img, boxes, seg
 
 
+class SpawnNumber:
+    def __init__(self, prob: float) -> None:
+        assert 0 <= prob <= 1, "Invalid range for prob"
+        self._prob = prob
+        
+    def __call__(self, data):
+        img, boxes, seg = data
+        for box in boxes:
+            if self._does_not_have_number(box) and self._number_should_be_spawned():
+                number = np.random.randint(1, 7)
+
+                pimg = Image.fromarray(img)
+                d = ImageDraw.Draw(pimg)
+                f = ImageFont.truetype("/usr/share/fonts/truetype/freefont/FreeMono.ttf", int(0.25 * box[4]))
+                d.text((box[1], box[2]), str(number), fill=255, font=f, anchor="mb")
+
+                img = np.asarray(pimg)
+                #print(box[0])
+                #plt.imshow(img)
+                #plt.show()
+                
+                box[0] += number
+
+
+        return img, boxes, seg
+
+    @staticmethod
+    def _does_not_have_number(box):
+        return box[0] != 0 and (box[0] -1) % 7 == 0
+
+    def _number_should_be_spawned(self):
+        return np.random.binomial(1, self._prob)
+
+
+
 class PadSquare(ImgAug):
     def __init__(self, ):
         self.augmentations = iaa.Sequential([
@@ -123,6 +162,14 @@ class Resize(object):
 
 DEFAULT_TRANSFORMS = transforms.Compose([
     AbsoluteLabels(),
+    PadSquare(),
+    RelativeLabels(),
+    ToTensor(),
+])
+
+SPAWN_TRANSFORMS = transforms.Compose([
+    AbsoluteLabels(),
+    SpawnNumber(.75),
     PadSquare(),
     RelativeLabels(),
     ToTensor(),
