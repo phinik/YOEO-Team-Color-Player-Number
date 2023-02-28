@@ -5,6 +5,8 @@ import torch.nn as nn
 
 from .utils import to_cpu
 
+from custom_loss import ColorLoss, NumberLoss
+
 # This new loss function is based on https://github.com/ultralytics/yolov3/blob/master/utils/loss.py
 
 
@@ -55,7 +57,7 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=
         return iou  # IoU
 
 
-def compute_loss(combined_predictions, combined_targets, model):
+def compute_loss(combined_predictions, combined_targets, model, number_weight):
     # Split seg and yolo stuff
     yolo_targets, seg_targets = combined_targets
     yolo_predictions, seg_predictions = combined_predictions    # Check which device was used
@@ -79,11 +81,11 @@ def compute_loss(combined_predictions, combined_targets, model):
     BCEobj = nn.BCEWithLogitsLoss(
         pos_weight=torch.tensor([1.0], device=device))
 
-    CEcolor = nn.CrossEntropyLoss(weight=torch.tensor([2.34514356, 3.55462963, 1.], device=device), ignore_index=-1)
-    CEnumber = nn.CrossEntropyLoss(
-        weight=torch.tensor([1.0, 28.56632653, 40.86861314, 23.52521008, 21.61776062, 155.52777778, 61.52747253], device=device), 
-        ignore_index=-1
-        )
+    # Loss function for the team color attribute
+    CEcolor = ColorLoss("mean", device)
+
+    # Loss function for the player number attribute
+    CEnumber = NumberLoss("mean", device)
 
     # Calculate losses for each yolo layer
     for layer_index, layer_predictions in enumerate(yolo_predictions):
@@ -116,7 +118,8 @@ def compute_loss(combined_predictions, combined_targets, model):
             # Fill our empty object target tensor with the IoU we just calculated for each target at the targets position
             tobj[b, anchor, grid_j, grid_i] = iou.detach().clamp(0).type(tobj.dtype)  # Use cells with iou > 0 as object targets
 
-
+            # Robot targets are passed in direct encoding into YOEO. We need to convert them to 
+            # tuple format before we can use them.
             shifted_labels = torch.add(tcls[layer_index], -1)
             t_color = torch.div(shifted_labels, 7, rounding_mode='floor')
             t_color[shifted_labels == -1] = -1
@@ -135,20 +138,22 @@ def compute_loss(combined_predictions, combined_targets, model):
                 # Use the tensor to calculate the BCE loss
                 lcls += BCEcls(ps[:, 5:7], t)  # BCE
 
-                # color loss
+                # Team color loss
                 lcolor += CEcolor(ps[:, 7:10], t_color)
+
+                # Player number loss
                 lnumber += CEnumber(ps[:, 10:], t_number)
 
         # Classification of the objectness the sequel
         # Calculate the BCE loss between the on the fly generated target and the network prediction
         lobj += BCEobj(layer_predictions[..., 4], tobj) # obj loss
 
-    # Scalaing of losses
+    # Scaling of losses
     lbox *= 0.2
     lobj *= 1.0
     lcls *= 0.05
-    lcolor *= 0.025
-    lnumber *= 0.025
+    lcolor *= 0.05
+    lnumber *= 0.05
 
     # Merge losses
     loss = lbox + lobj + lcls + seg_loss + lcolor + lnumber
