@@ -2,6 +2,10 @@ import numpy as np
 
 
 class Metric:
+    """
+    Metric object providing usefule metrics based on a confusion matrix
+    """
+
     def __init__(self, n_classes):
         self._n_classes = n_classes
         self._conf_matrix = np.zeros(shape=(n_classes, n_classes))
@@ -37,10 +41,13 @@ class Metric:
     def reset(self) -> None:
         self._conf_matrix = np.zeros(shape=(self._n_classes, self._n_classes))
 
+    def get_conf_matrix(self) -> np.ndarray:
+        return self._conf_matrix
+
 
     def ACC(self, class_id: int) -> float:
         denom = np.sum(self._conf_matrix)
-        return (self._tp(class_id) + self._tn(class_id)) / denom if denom != 0 else 0
+        return (self._tp(class_id) + self._tn(class_id)) / denom if denom != 0 else float("nan")
 
     def mACC(self) -> float:
         return self._mean(self.ACC)
@@ -56,21 +63,21 @@ class Metric:
 
     def PREC(self, class_id: int) -> float:
         denom = (self._tp(class_id) + self._fp(class_id))
-        return self._tp(class_id) / denom if denom != 0 else 0
+        return self._tp(class_id) / denom if denom != 0 else float("nan")
 
     def REC(self, class_id: int) -> float:
         return self.TPR(class_id)
 
     def F1(self, class_id: int) -> float:
         denom = (2 * self._tp(class_id) + self._fp(class_id) + self._fn(class_id))
-        return 2 * self._tp(class_id) / denom if denom != 0 else 0
+        return 2 * self._tp(class_id) / denom if denom != 0 else float("nan")
 
     def TNR(self, class_id: int) -> float:
         denom = self._fp(class_id) + self._tn(class_id)
-        return self._tn(class_id) / denom if denom != 0 else 0
+        return self._tn(class_id) / denom if denom != 0 else float("nan")
 
     def TPR(self, class_id: int) -> float:
         denom = (self._tp(class_id) + self._fn(class_id))
-        return self._tp(class_id) / denom if denom != 0 else 0
+        return self._tp(class_id) / denom if denom != 0 else float("nan")
     
     
