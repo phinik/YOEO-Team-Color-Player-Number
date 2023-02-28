@@ -260,8 +260,8 @@ def run():
                 seg_class_ious = metrics_output[1]
                 color_metric = metrics_output[2]
                 number_metric = metrics_output[3]
-                colors = {0: "red", 1: "blue", 2: "unknown"}
-                numbers = {0: "unknown", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6"}
+                colors = {0: "red", 1: "blue", 2: "c_unknown"}
+                numbers = {0: "n_unknown", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6"}
                 evaluation_metrics = [
                     ("validation/precision", precision.mean()),
                     ("validation/recall", recall.mean()),
@@ -272,6 +272,7 @@ def run():
                 evaluation_metrics.append(("validation/color_mbACC", color_metric.mbACC()))
                 for i in range(3):
                     evaluation_metrics.append((f"validation/{colors[i]}_bACC", color_metric.bACC(i)))
+                    evaluation_metrics.append((f"validation/{colors[i]}_ACC", color_metric.ACC(i)))
                     evaluation_metrics.append((f"validation/{colors[i]}_rec", color_metric.REC(i)))
                     evaluation_metrics.append((f"validation/{colors[i]}_prec", color_metric.PREC(i)))
 

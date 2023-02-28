@@ -6,7 +6,7 @@ import argparse
 import tqdm
 import numpy as np
 
-from terminaltables import AsciiTable
+from terminaltables import AsciiTable, SingleTable
 
 import torch
 from torch.utils.data import DataLoader
@@ -15,11 +15,11 @@ from torch.autograd import Variable
 from yoeo.models import load_model
 from yoeo.utils.utils import load_classes, ap_per_class, get_batch_statistics, non_max_suppression, to_cpu, xywh2xyxy, print_environment_info, seg_iou, encode_predictions, encode_targets
 from yoeo.utils.datasets import ListDataset
-from yoeo.utils.transforms import DEFAULT_TRANSFORMS, SPAWN_TRANSFORMS
+from yoeo.utils.transforms import DEFAULT_TRANSFORMS
 from yoeo.utils.parse_config import parse_data_config
-from yoeo.utils.metric import Metric
 
 from yoeo.utils.metric import Metric
+from yoeo.utils.entropy_map import EntropyMap
 
 
 def evaluate_model_file(model_path, weights_path, img_path, class_names, batch_size=8, img_size=416,
@@ -65,8 +65,9 @@ def evaluate_model_file(model_path, weights_path, img_path, class_names, batch_s
     return metrics_output, seg_class_ious, color_metric, number_metric
 
 
-def print_eval_stats(metrics_output, seg_class_ious, color_metric, number_metric, class_names, verbose):
+def print_eval_stats(metrics_output, seg_class_ious, color_metric, number_metric, entropy_color, entropy_number, class_names, verbose):
     # Print detection statistics
+    print("#### DETECTION ####")
     if metrics_output is not None:
         precision, recall, AP, f1, ap_class = metrics_output
         if verbose:
@@ -81,6 +82,7 @@ def print_eval_stats(metrics_output, seg_class_ious, color_metric, number_metric
 
 
     # Print segmentation statistics
+    print("#### SEGMENTATION ####")
     if verbose:
         # Print IoU per segmentation class
         seg_table = [["Index", "Class", "IoU"]]
@@ -93,6 +95,7 @@ def print_eval_stats(metrics_output, seg_class_ious, color_metric, number_metric
 
 
     # Print color statistics
+    print("#### TEAM COLOR ####")
     if metrics_output is not None:
         mbACC = color_metric.mbACC()
         bACC_red = color_metric.bACC(0)
@@ -100,29 +103,84 @@ def print_eval_stats(metrics_output, seg_class_ious, color_metric, number_metric
         bACC_un = color_metric.bACC(2)
                     
         if verbose:
-            # Prints class ACC and mean ACC
+            # Prints class bACC and mean bACC
             ap_table = [["Index", "Class", "bACC"]]
             classes = ["red", "blue", "unknown"]
             accs = [bACC_red, bACC_blue, bACC_un]
             for i, c in enumerate(classes):
                 ap_table += [[classes.index(c), c, "%.5f" % accs[i]]]
             print(AsciiTable(ap_table).table)
+
+            # Confusion Matrix
+            ap_table = [["P / T", "0", "1", "2"]]
+            classes = ["0", "1", "2"]
+            for i, c in enumerate(classes):
+                ap_table += [[classes[i]] + [int(color_metric.get_conf_matrix()[i, j]) for j in range(len(classes))]]
+            tab = SingleTable(ap_table, "Confusion Matrix")
+            tab.inner_row_border = True
+            tab.justify_columns = {0: 'center', 1: 'center', 2: 'center'}
+            print(tab.table)
+
+            # Mean Entropy Confusion Matrix
+            ap_table = [["P / T", "0", "1", "2"]]
+            classes = ["0", "1", "2"]
+
+            max_entropy = -np.log2(1/3)
+            mean_entropy = entropy_color.get_map() / (color_metric.get_conf_matrix() + 1e-10)
+            mean_entropy /= max_entropy
+            
+            for i, c in enumerate(classes):
+                ap_table += [[classes[i]] + ["%.2f" % mean_entropy[i, j] for j in range(len(classes))]]
+            
+            tab = SingleTable(ap_table, "Mean Entropy Confusion Matrix - " + "%.2f" % max_entropy)
+            tab.inner_row_border = True
+            tab.justify_columns = {0: 'center', 1: 'center', 2: 'center'}
+            print(tab.table)
+
         print(f"---- mbACC {mbACC:.5f} ----")
     else:
         print("---- mAP not measured (no detections found by model) ----")
 
     # Print number statistics
+    print("#### PLAYER NUMBER ####")
     if metrics_output is not None:
         mbACC = number_metric.mbACC()
         bACCs = [number_metric.bACC(i) for i in range(7)]
                     
         if verbose:
-            # Prints class ACC and mean ACC
+            # Prints class bACC and mean bACC
             ap_table = [["Index", "Class", "bACC"]]
             classes = ["unknown", "1", "2", "3", "4", "5", "6"]
             for i, c in enumerate(classes):
                 ap_table += [[classes.index(c), c, "%.5f" % bACCs[i]]]
             print(AsciiTable(ap_table).table)
+            
+            # Confusion Matrix
+            ap_table = [["P / T", "0", "1", "2", "3", "4", "5", "6"]]
+            classes = ["0", "1", "2", "3", "4", "5", "6"]
+            for i, c in enumerate(classes):
+                ap_table += [[classes[i]] + [int(number_metric.get_conf_matrix()[i, j]) for j in range(len(classes))]]
+            tab = SingleTable(ap_table, "Confusion Matrix")
+            tab.inner_row_border = True
+            tab.justify_columns = {0: 'center', 1: 'center', 2: 'center', 3: 'center', 4: 'center', 5: 'center', 6: 'center', 7: 'center'}
+            print(tab.table)
+
+            # Mean Entropy Confusion Matrix
+            ap_table = [["P / T", "0", "1", "2", "3", "4", "5", "6"]]
+            classes = ["0", "1", "2", "3", "4", "5", "6"]
+
+            max_entropy = -np.log2(1/7)
+            mean_entropy = entropy_number.get_map() / (number_metric.get_conf_matrix() + 1e-10)
+            mean_entropy /= max_entropy
+
+            for i, c in enumerate(classes):
+                ap_table += [[classes[i]] + ["%.2f" % mean_entropy[i, j] for j in range(len(classes))]]
+            
+            tab = SingleTable(ap_table, "Mean Entropy Confusion Matrix - " + "%.2f" % max_entropy)
+            tab.inner_row_border = True
+            tab.justify_columns = {0: 'center', 1: 'center', 2: 'center', 3: 'center', 4: 'center', 5: 'center', 6: 'center', 7: 'center'}
+            print(tab.table)
+
         print(f"---- mbACC {mbACC:.5f} ----")
     else:
         print("---- mAP not measured (no detections found by model) ----")
@@ -156,8 +214,12 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
     labels = []
     sample_metrics = []  # List of tuples (TP, confs, pred)
     seg_ious = []
+
+    # Metric objects for class metric and entropy
     color_metric = Metric(3)
     number_metric = Metric(7)
+    color_entropy = EntropyMap(3)
+    number_entropy = EntropyMap(7)
 
     import time
     times=[]
@@ -175,16 +237,20 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
             times.append(time.time() - t1)
             yolo_outputs = non_max_suppression(yolo_outputs, conf_thres=conf_thres, iou_thres=nms_thres)
             
-        yolo_outputs = encode_predictions(yolo_outputs)
+        yolo_outputs = encode_predictions(yolo_outputs, True)
         bb_targets = encode_targets(bb_targets)
 
         # Extract labels
         labels += bb_targets[:, 1].tolist()
 
-        s_metrics, c_metric, n_metric = get_batch_statistics(yolo_outputs, bb_targets, iou_threshold=iou_thres)
+        s_metrics, c_metric, n_metric, e_color, e_number = get_batch_statistics(yolo_outputs, bb_targets, iou_threshold=iou_thres)
+
+        # Update metric objects
         sample_metrics += s_metrics
         color_metric += c_metric
         number_metric += n_metric
+        color_entropy += e_color
+        number_entropy += e_number
 
         seg_ious.append(seg_iou(to_cpu(segmentation_outputs), mask_targets, model.num_seg_classes))
 
@@ -202,7 +268,7 @@ def _evaluate(model, dataloader, class_names, img_size, iou_thres, conf_thres, n
 
     seg_class_ious = [np.array(class_ious).mean() for class_ious in list(zip(*seg_ious))]
 
-    print_eval_stats(yolo_metrics_output, seg_class_ious, color_metric, number_metric, class_names, verbose)
+    print_eval_stats(yolo_metrics_output, seg_class_ious, color_metric, number_metric, color_entropy, number_entropy, class_names, verbose)
 
     return yolo_metrics_output, seg_class_ious, color_metric, number_metric
 
