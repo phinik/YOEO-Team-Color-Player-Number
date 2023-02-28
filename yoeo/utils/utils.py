@@ -17,6 +17,7 @@ import yaml
 import os
 
 from yoeo.utils.metric import Metric
+from yoeo.utils.entropy_map import EntropyMap
 
 
 def provide_determinism(seed=42):
@@ -311,22 +312,27 @@ def get_batch_statistics(outputs, targets, iou_threshold):
     batch_metrics = []
     color_metric = Metric(3)
     number_metric = Metric(7)
+    color_entropy = EntropyMap(3)
+    number_entropy = EntropyMap(7)
 
     for sample_i in range(len(outputs)):
 
         if outputs[sample_i] is None:# or outputs[sample_i].nelement() == 0:
             continue
 
+        # Disassamble outputs for easier access
         output = outputs[sample_i]
         pred_boxes = output[:, :4]
         pred_scores = output[:, 4]
         pred_labels = output[:, 5]
         pred_colors = output[:, 6]
         pred_numbers = output[:, 7]
+        en_colors = output[:, 8]
+        en_numbers = output[:, 9]
 
         true_positives = np.zeros(pred_boxes.shape[0])
         
-
+        # Disassemble targets for easier access
         annotations = targets[targets[:, 0] == sample_i][:, 1:]
         target_labels = annotations[:, 0] if len(annotations) else []
         target_colors = annotations[:, -2] if len(annotations) else []
@@ -336,7 +342,7 @@ def get_batch_statistics(outputs, targets, iou_threshold):
             detected_boxes = []
             target_boxes = annotations[:, 1:5]
 
-            for pred_i, (pred_box, pred_label, pred_color, pred_number) in enumerate(zip(pred_boxes, pred_labels, pred_colors, pred_numbers)):
+            for pred_i, (pred_box, pred_label, pred_color, pred_number, en_color, en_number) in enumerate(zip(pred_boxes, pred_labels, pred_colors, pred_numbers, en_colors, en_numbers)):
 
                 # If targets are found break
                 if len(detected_boxes) == len(annotations):
@@ -364,26 +370,62 @@ def get_batch_statistics(outputs, targets, iou_threshold):
                     # wir mappen eh nur gegen Boxen, die das gleiche target label haben wie das pred_label. Daher ist es egal
                     # ob wir hier basierend auf target_label[box_index] oder pred_label unterscheiden.
                     if pred_label > 0:
+                        # update metric and entropy objects for color and numbers
                         color_metric.update(pred_color.int(), target_colors[box_index].int())
+                        color_entropy.update(en_color, pred_color.int(), target_colors[box_index].int())
                         number_metric.update(pred_number.int(), target_numbers[box_index].int())
+                        number_entropy.update(en_number, pred_number.int(), target_numbers[box_index].int())
 
         batch_metrics.append([true_positives, pred_scores, pred_labels])
-    return batch_metrics, color_metric, number_metric
+    return batch_metrics, color_metric, number_metric, color_entropy, number_entropy
 
-def encode_predictions(preds):
+def encode_predictions(preds, include_entropy: bool = False):
+    """
+    Method to turn the YOEO output into a more useful format.
+    Includes:
+    - argmax over all color classes
+    - argmax over all number classes
+    - entropy calculcation for both color and number predicitons
+    """
     for sample_i in range(len(preds)):
         if preds[sample_i] is None:
             continue
 
         pred = preds[sample_i]
+
+        # Determine team color attribute
         p_color = torch.argmax(pred[:, 6:9], dim=1, keepdim=True)
+
+        # Determine player number attribute
         p_number = torch.argmax(pred[:, 9:], dim=1, keepdim=True)
+
+        # Calculate entropy of team color prediction
+        e_color = torch.unsqueeze(calculate_entropy(pred[:, 6:9]), dim=1)
+
+        # Calculate entropy of player numbe prediction
+        e_number = torch.unsqueeze(calculate_entropy(pred[:, 9:]), dim=1)
+
+        # Reassamble predictions with team color and player number attribute
         pred = torch.cat((pred[:, :6], p_color, p_number), dim=1)
+
+        # Add entropy if required
+        if include_entropy:           
+            pred = torch.cat((pred, e_color, e_number), dim=1)
+
         preds[sample_i] = pred
 
     return preds
 
+def calculate_entropy(preds):
+    preds = torch.softmax(preds, dim=1)
+    return -torch.sum(preds * torch.log2(preds), dim=1)
+
 def encode_targets(targets):
+    """
+    Targets are passed with direct encoding into YOEO, hence,
+    for the tuple approach, we need to decode them into the 
+    proper (tupel) format
+    """
     # Shift labels by 1 to the left (ball class)
     shifted_targets = torch.add(targets[:, 1], -1)
 
